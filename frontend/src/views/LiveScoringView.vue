@@ -308,28 +308,49 @@ function ballLabel(e) {
 
 async function quickRun(runs) {
   if (!inn.value) return
-  const striker = activeBatsmen.value.find(b => b.is_on_strike)
-  const nonStriker = activeBatsmen.value.find(b => !b.is_on_strike)
-  if (!striker || !nonStriker || !currentBowler.value) return
-  await postBall({ striker_id: striker.player_id, non_striker_id: nonStriker.player_id, bowler_id: currentBowler.value.player_id, runs_scored: runs })
+  const batsmen = activeBatsmen.value
+  if (batsmen.length === 0 || !currentBowler.value) return
+  
+  let striker = batsmen.find(b => b.is_on_strike)
+  let nonStriker = batsmen.find(b => !b.is_on_strike)
+  
+  if (!striker && batsmen.length > 0) {
+    striker = batsmen[0]
+    nonStriker = batsmen[1] || null
+  }
+
+  await postBall({ 
+    striker_id: striker.player_id, 
+    non_striker_id: nonStriker?.player_id || null, 
+    bowler_id: currentBowler.value.player_id, 
+    runs_scored: runs 
+  })
 }
 
 function openExtra(type) {
   modal.value = { open: true, type, title: type.replace('_',' ').toUpperCase(), wicket_type: 'bowled', dismissed_id: null, fielder_id: null, runs_scored: 0, extra_runs: 1 }
 }
 function openWicket() {
-  const striker = activeBatsmen.value.find(b => b.is_on_strike)
+  const striker = activeBatsmen.value.find(b => b.is_on_strike) || activeBatsmen.value[0]
   modal.value = { open: true, type: 'wicket', title: 'Wicket!', wicket_type: 'bowled', dismissed_id: striker?.player_id || null, fielder_id: null, runs_scored: 0, extra_runs: 0 }
 }
 
 async function submitModal() {
-  const striker = activeBatsmen.value.find(b => b.is_on_strike)
-  const nonStriker = activeBatsmen.value.find(b => !b.is_on_strike)
-  if (!striker || !nonStriker || !currentBowler.value) return
+  const batsmen = activeBatsmen.value
+  if (batsmen.length === 0 || !currentBowler.value) return
+  
+  let striker = batsmen.find(b => b.is_on_strike)
+  let nonStriker = batsmen.find(b => !b.is_on_strike)
+  
+  if (!striker && batsmen.length > 0) {
+    striker = batsmen[0]
+    nonStriker = batsmen[1] || null
+  }
+
   const m = modal.value
   const ball = {
     striker_id: striker.player_id,
-    non_striker_id: nonStriker.player_id,
+    non_striker_id: nonStriker?.player_id || null,
     bowler_id: currentBowler.value.player_id,
     runs_scored: m.type === 'wicket' ? m.runs_scored : (m.type === 'no_ball' ? m.runs_scored : 0),
     extras_type: m.type !== 'wicket' ? m.type : null,

@@ -83,6 +83,7 @@ class MatchCreate(BaseModel):
     team2_id: int
     overs: int = 20
     players_per_team: int = 11
+    last_man_stands: bool = False
 
 
 class TossRecord(BaseModel):
@@ -111,6 +112,7 @@ class MatchOut(BaseModel):
     team2: TeamBrief
     overs: int
     players_per_team: int
+    last_man_stands: bool = False
     toss_winner_id: Optional[int] = None
     toss_decision: Optional[str] = None
     status: str
@@ -127,7 +129,7 @@ class MatchOut(BaseModel):
 
 class InningsStart(BaseModel):
     striker_id: int
-    non_striker_id: int
+    non_striker_id: Optional[int] = None
     bowler_id: int
 
 
@@ -152,7 +154,7 @@ class InningsOut(BaseModel):
 
 class BallRecord(BaseModel):
     striker_id: int
-    non_striker_id: int
+    non_striker_id: Optional[int] = None
     bowler_id: int
     runs_scored: int = 0
     extras_type: Optional[str] = None  # wide, no_ball, bye, leg_bye
@@ -168,7 +170,7 @@ class BallEventOut(BaseModel):
     over_number: int
     ball_number: int
     striker_id: int
-    non_striker_id: int
+    non_striker_id: Optional[int] = None
     bowler_id: int
     runs_scored: int
     extras_type: Optional[str] = None
@@ -263,6 +265,7 @@ class QuickMatchSetup(BaseModel):
     team2_players: list[str]
     overs: int = 20
     players_per_team: int = 11
+    last_man_stands: bool = False
     toss_winner: int  # 1 or 2
     toss_decision: str  # "bat" or "bowl"
     tournament_id: Optional[int] = None

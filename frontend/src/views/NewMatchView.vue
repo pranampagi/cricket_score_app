@@ -35,6 +35,10 @@
             <label class="form-label">Players per Team</label>
             <input type="number" v-model.number="form.players_per_team" class="input" min="2" max="30" placeholder="e.g. 11" />
           </div>
+          <div class="form-group" style="display:flex;align-items:center;gap:0.5rem;margin-top:1.5rem">
+            <input type="checkbox" id="lms" v-model="form.last_man_stands" style="width:1.25rem;height:1.25rem;cursor:pointer;" />
+            <label for="lms" class="form-label" style="margin:0;cursor:pointer;">Last Man Stands Rule</label>
+          </div>
         </div>
         <div class="step-actions">
           <button class="btn btn-primary btn-lg" @click="step=2">Next: Teams →</button>
@@ -192,6 +196,7 @@ const form = ref({
   tournament_id: null,
   overs: 20,
   players_per_team: 11,
+  last_man_stands: true,
   team1_name: '',
   team2_name: '',
   team1_id: null,
@@ -274,6 +279,7 @@ async function startMatch() {
         tournament_id: null,
         overs: f.overs,
         players_per_team: f.players_per_team,
+        last_man_stands: f.last_man_stands,
         team1_name: f.team1_name,
         team2_name: f.team2_name,
         team1_players: t1p,
@@ -292,6 +298,7 @@ async function startMatch() {
         tournament_id: f.tournament_id,
         overs: f.overs,
         players_per_team: f.players_per_team,
+        last_man_stands: f.last_man_stands,
         team1_id: f.team1_id,
         team2_id: f.team2_id
       })

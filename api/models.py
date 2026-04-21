@@ -58,6 +58,7 @@ class Match(Base):
     current_innings = Column(Integer, default=0)  # 0=not started, 1=first, 2=second
     winner_id = Column(Integer, ForeignKey("teams.id"), nullable=True)
     result_summary = Column(Text, nullable=True)
+    last_man_stands = Column(Boolean, default=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     tournament = relationship("Tournament", back_populates="matches")
@@ -99,7 +100,7 @@ class BallEvent(Base):
     over_number = Column(Integer, nullable=False)  # 0-indexed
     ball_number = Column(Integer, nullable=False)  # 1-6 for legal deliveries
     striker_id = Column(Integer, ForeignKey("players.id"), nullable=False)
-    non_striker_id = Column(Integer, ForeignKey("players.id"), nullable=False)
+    non_striker_id = Column(Integer, ForeignKey("players.id"), nullable=True)
     bowler_id = Column(Integer, ForeignKey("players.id"), nullable=False)
     runs_scored = Column(Integer, default=0)  # Runs credited to batsman
     extras_type = Column(String(20), nullable=True)  # wide, no_ball, bye, leg_bye

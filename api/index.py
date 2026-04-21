@@ -107,6 +107,7 @@ def quick_match(data: schemas.QuickMatchSetup, db: Session = Depends(get_db)):
         tournament_id=data.tournament_id,
         team1_id=t1.id, team2_id=t2.id,
         overs=data.overs, players_per_team=data.players_per_team,
+        last_man_stands=data.last_man_stands,
         toss_winner_id=winner_team.id,
         toss_decision=data.toss_decision,
         status="toss"
@@ -171,7 +172,10 @@ def start_innings(mid: int, data: schemas.InningsStart, db: Session = Depends(ge
     db.add(innings); db.flush()
 
     # Create batting score entries for openers
-    for pos, pid in enumerate([data.striker_id, data.non_striker_id]):
+    batsmen = [data.striker_id]
+    if data.non_striker_id:
+        batsmen.append(data.non_striker_id)
+    for pos, pid in enumerate(batsmen):
         bs = models.BattingScore(
             innings_id=innings.id, player_id=pid,
             batting_position=pos + 1,
@@ -307,13 +311,34 @@ def record_ball(iid: int, data: schemas.BallRecord, db: Session = Depends(get_db
     if rotate:
         # Swap striker and non-striker in batting scores
         striker_bs = db.query(models.BattingScore).filter_by(innings_id=iid, player_id=data.striker_id).first()
-        non_striker_bs = db.query(models.BattingScore).filter_by(innings_id=iid, player_id=data.non_striker_id).first()
-        if striker_bs and non_striker_bs:
-            striker_bs.is_on_strike = False
-            non_striker_bs.is_on_strike = True
+        non_striker_id = data.non_striker_id
+        if not non_striker_id:
+            # Try to find the other batsman at crease if not provided
+            other = db.query(models.BattingScore).filter(
+                models.BattingScore.innings_id == iid,
+                models.BattingScore.is_at_crease == True,
+                models.BattingScore.player_id != data.striker_id
+            ).first()
+            if other:
+                non_striker_id = other.player_id
+
+        if non_striker_id:
+            non_striker_bs = db.query(models.BattingScore).filter_by(innings_id=iid, player_id=non_striker_id).first()
+            if striker_bs and non_striker_bs:
+                striker_bs.is_on_strike = False
+                non_striker_bs.is_on_strike = True
+
+    # Ensure at least one person is on strike if anyone is at the crease
+    at_crease = db.query(models.BattingScore).filter_by(innings_id=iid, is_at_crease=True).all()
+    if len(at_crease) == 1:
+        at_crease[0].is_on_strike = True
+    elif len(at_crease) > 1:
+        on_strike = [b for b in at_crease if b.is_on_strike]
+        if not on_strike:
+            at_crease[0].is_on_strike = True
 
     # Check innings complete
-    max_wickets = match.players_per_team - 1
+    max_wickets = match.players_per_team if match.last_man_stands else match.players_per_team - 1
     max_balls = match.overs * 6
     innings_over = innings.total_wickets >= max_wickets or (is_legal and innings.total_balls >= max_balls)
     if innings_over:
@@ -420,7 +445,8 @@ def _finish_match(match, innings, db):
         if innings.total_runs >= innings.target:
             # chasing team won
             match.winner_id = innings.batting_team_id
-            wkts_left = (match.players_per_team - 1) - innings.total_wickets
+            total_possible_wkts = match.players_per_team if match.last_man_stands else match.players_per_team - 1
+            wkts_left = total_possible_wkts - innings.total_wickets
             match.result_summary = f"{innings.batting_team.name} won by {wkts_left} wickets"
         else:
             runs_diff = inn1.total_runs - innings.total_runs
