@@ -88,7 +88,7 @@
         </div>
 
         <!-- Right: Scoring Controls -->
-        <div class="scoring-controls card">
+        <div v-if="state?.match?.status === 'live'" class="scoring-controls card">
           <div class="section-title" style="margin-bottom:1rem">Record Delivery</div>
 
           <!-- Run buttons -->
@@ -108,6 +108,7 @@
 
           <!-- End of over: change bowler -->
           <div v-if="needNewBowler" class="change-bowler-box">
+
             <div class="section-title">Select Next Bowler</div>
             <select v-model.number="nextBowlerId" class="select" style="margin-bottom:0.75rem">
               <option value="">Choose bowler</option>
@@ -132,17 +133,27 @@
       </div>
 
       <!-- Innings break / match over -->
-      <div v-if="state?.match?.status === 'innings_break'" class="innings-break card">
-        <h3>🔄 Innings Break</h3>
+
+
+      <!-- Innings Break Card -->
+      <div v-if="state?.match?.status === 'innings_break'" class="match-over card">
+        <div style="font-size:2rem">⏳</div>
+        <h3>Innings Break</h3>
         <p class="text-dim">{{ bowlingTeam?.name }} needs {{ (inn?.total_runs || 0) + 1 }} to win.</p>
-        <button class="btn btn-primary btn-lg" @click="startSecondInnings">Start 2nd Innings</button>
+        <div style="display:flex; gap:1rem; justify-content:center; margin-top:1rem">
+          <button class="btn btn-primary btn-lg" @click="startSecondInnings">Start Second Innings</button>
+          <button class="btn btn-ghost btn-lg" @click="undoBall" :disabled="!canUndo">Undo Last Ball</button>
+        </div>
       </div>
 
       <div v-if="state?.match?.status === 'completed'" class="match-over card">
         <div style="font-size:2rem">🏆</div>
         <h3>Match Complete!</h3>
         <p class="text-green" style="font-size:1.1rem;font-weight:700">{{ state.match.result_summary }}</p>
-        <RouterLink :to="`/match/${matchId}/scorecard`" class="btn btn-primary btn-lg" style="margin-top:1rem">View Scorecard</RouterLink>
+        <div style="display:flex; gap:1rem; justify-content:center; margin-top:1rem">
+          <RouterLink :to="`/match/${matchId}/scorecard`" class="btn btn-primary btn-lg">View Scorecard</RouterLink>
+          <button class="btn btn-ghost btn-lg" @click="undoBall" :disabled="!canUndo">Undo Last Ball</button>
+        </div>
       </div>
     </div>
 
