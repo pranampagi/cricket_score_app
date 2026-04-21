@@ -36,11 +36,26 @@ export const useCricketStore = defineStore('cricket', () => {
     }
   }
 
+  async function undoBall(inningsId) {
+    loading.value = true
+    try {
+      const { data } = await api.post(`/innings/${inningsId}/undo`)
+      liveState.value = data
+      currentMatch.value = data.match
+      return data
+    } catch (e) {
+      error.value = e.response?.data?.detail || e.message
+      throw e
+    } finally {
+      loading.value = false
+    }
+  }
+
   function reset() {
     liveState.value = null
     currentMatch.value = null
     error.value = null
   }
 
-  return { liveState, currentMatch, loading, error, fetchLive, recordBall, reset }
+  return { liveState, currentMatch, loading, error, fetchLive, recordBall, undoBall, reset }
 })

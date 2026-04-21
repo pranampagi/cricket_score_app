@@ -238,8 +238,8 @@ async function startMatch() {
     }
     const { data: match } = await api.post('/matches/quick', payload)
     // Determine player IDs for innings start
-    const { data: t1 } = await api.get(`/teams/${match.team1_id}`)
-    const { data: t2 } = await api.get(`/teams/${match.team2_id}`)
+    const { data: t1 } = await api.get(`/teams/${match.team1.id}`)
+    const { data: t2 } = await api.get(`/teams/${match.team2.id}`)
     const batTeamData = battingTeamIndex.value === 1 ? t1 : t2
     const bowlTeamData = battingTeamIndex.value === 1 ? t2 : t1
     const striker = batTeamData.players[f.striker_id]

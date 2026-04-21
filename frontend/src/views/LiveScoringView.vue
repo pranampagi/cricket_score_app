@@ -177,7 +177,7 @@
             <label class="form-label">Runs Scored Off This Delivery</label>
             <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
               <button v-for="r in [0,1,2,3,4,6]" :key="r"
-                class="run-btn" :class="`r${r}`" style="width:44px;height:44px;font-size:1rem"
+                class="run-btn" style="width:44px;height:44px;font-size:1rem"
                 :class="[`r${r}`, modal.runs_scored===r?'selected-run':'']"
                 @click="modal.runs_scored=r">{{ r }}</button>
             </div>
@@ -403,7 +403,17 @@ async function startSecondInnings() {
   } catch (e) { console.error(e) }
 }
 
-async function undoBall() { /* TODO */ }
+async function undoBall() {
+  if (!inn.value) return
+  if (!confirm('Are you sure you want to undo the last delivery?')) return
+  try {
+    await store.undoBall(inn.value.id)
+    needNewBowler.value = false
+    needNewBatsman.value = false
+  } catch (e) {
+    console.error('Failed to undo', e)
+  }
+}
 
 let pollInterval = null
 onMounted(async () => {
