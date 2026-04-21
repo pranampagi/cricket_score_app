@@ -45,20 +45,34 @@
       <!-- Step 2: Team Names -->
       <Transition name="slide-up" mode="out-in">
       <div v-if="step === 2" key="s2" class="card">
-        <h2 class="section-title">Team Names</h2>
+        <h2 class="section-title">Teams</h2>
         <div class="grid-2">
-          <div class="form-group">
+          <div class="form-group" v-if="!isTournamentMode">
             <label class="form-label">Team 1 Name</label>
             <input v-model="form.team1_name" class="input" placeholder="e.g. Mumbai Indians" />
           </div>
-          <div class="form-group">
+          <div class="form-group" v-else>
+            <label class="form-label">Team 1</label>
+            <select v-model="form.team1_id" class="select" @change="updateTournamentTeam(1)">
+              <option :value="null">Select Team</option>
+              <option v-for="t in activeTournament?.teams" :key="t.id" :value="t.id" :disabled="t.id === form.team2_id">{{ t.name }}</option>
+            </select>
+          </div>
+          <div class="form-group" v-if="!isTournamentMode">
             <label class="form-label">Team 2 Name</label>
             <input v-model="form.team2_name" class="input" placeholder="e.g. Chennai Super Kings" />
+          </div>
+          <div class="form-group" v-else>
+            <label class="form-label">Team 2</label>
+            <select v-model="form.team2_id" class="select" @change="updateTournamentTeam(2)">
+              <option :value="null">Select Team</option>
+              <option v-for="t in activeTournament?.teams" :key="t.id" :value="t.id" :disabled="t.id === form.team1_id">{{ t.name }}</option>
+            </select>
           </div>
         </div>
         <div class="step-actions">
           <button class="btn btn-ghost" @click="step=1">← Back</button>
-          <button class="btn btn-primary btn-lg" @click="goToPlayers" :disabled="!form.team1_name || !form.team2_name">Next: Players →</button>
+          <button class="btn btn-primary btn-lg" @click="goToPlayers" :disabled="isTournamentMode ? (!form.team1_id || !form.team2_id) : (!form.team1_name || !form.team2_name)">Next: Players →</button>
         </div>
       </div>
       </Transition>
@@ -72,14 +86,14 @@
             <div class="team-players-title">{{ form.team1_name }}</div>
             <div v-for="(_, i) in form.team1_players" :key="`t1-${i}`" class="player-row">
               <span class="player-num">{{ i+1 }}</span>
-              <input v-model="form.team1_players[i]" class="input" :placeholder="`Player ${i+1}`" />
+              <input v-model="form.team1_players[i]" class="input" :placeholder="`Player ${i+1}`" :disabled="isTournamentMode" />
             </div>
           </div>
           <div class="team-players">
             <div class="team-players-title">{{ form.team2_name }}</div>
             <div v-for="(_, i) in form.team2_players" :key="`t2-${i}`" class="player-row">
               <span class="player-num">{{ i+1 }}</span>
-              <input v-model="form.team2_players[i]" class="input" :placeholder="`Player ${i+1}`" />
+              <input v-model="form.team2_players[i]" class="input" :placeholder="`Player ${i+1}`" :disabled="isTournamentMode" />
             </div>
           </div>
         </div>
@@ -180,6 +194,8 @@ const form = ref({
   players_per_team: 11,
   team1_name: '',
   team2_name: '',
+  team1_id: null,
+  team2_id: null,
   team1_players: Array(11).fill(''),
   team2_players: Array(11).fill(''),
   toss_winner: null,
@@ -189,13 +205,37 @@ const form = ref({
   bowler_id: ''
 })
 
+const isTournamentMode = computed(() => !!form.value.tournament_id)
+const activeTournament = computed(() => tournaments.value.find(t => t.id === form.value.tournament_id))
+
 watch(() => form.value.players_per_team, (n) => {
-  form.value.team1_players = Array(n).fill('')
-  form.value.team2_players = Array(n).fill('')
+  if (!isTournamentMode.value) {
+    form.value.team1_players = Array(n).fill('')
+    form.value.team2_players = Array(n).fill('')
+  }
 })
 
+function updateTournamentTeam(teamNum) {
+  if (!activeTournament.value) return
+  const tid = teamNum === 1 ? form.value.team1_id : form.value.team2_id
+  const team = activeTournament.value.teams.find(t => t.id === tid)
+  if (team) {
+    if (teamNum === 1) {
+      form.value.team1_name = team.name
+      form.value.team1_players = team.players.map(p => p.name)
+    } else {
+      form.value.team2_name = team.name
+      form.value.team2_players = team.players.map(p => p.name)
+    }
+  }
+}
+
 function goToPlayers() {
-  if (!form.value.team1_name || !form.value.team2_name) return
+  if (isTournamentMode.value) {
+    if (!form.value.team1_id || !form.value.team2_id) return
+  } else {
+    if (!form.value.team1_name || !form.value.team2_name) return
+  }
   step.value = 3
 }
 
@@ -223,34 +263,63 @@ async function startMatch() {
   loading.value = true; error.value = ''
   try {
     const f = form.value
-    const t1p = f.team1_players.map((n,i) => n || `Player ${i+1}`)
-    const t2p = f.team2_players.map((n,i) => n || `Player ${i+1}`)
-    const payload = {
-      tournament_id: f.tournament_id,
-      overs: f.overs,
-      players_per_team: f.players_per_team,
-      team1_name: f.team1_name,
-      team2_name: f.team2_name,
-      team1_players: t1p,
-      team2_players: t2p,
-      toss_winner: f.toss_winner,
-      toss_decision: f.toss_decision
+    let matchId
+    let batTeamData
+    let bowlTeamData
+
+    if (!isTournamentMode.value) {
+      const t1p = f.team1_players.map((n,i) => n || `Player ${i+1}`)
+      const t2p = f.team2_players.map((n,i) => n || `Player ${i+1}`)
+      const payload = {
+        tournament_id: null,
+        overs: f.overs,
+        players_per_team: f.players_per_team,
+        team1_name: f.team1_name,
+        team2_name: f.team2_name,
+        team1_players: t1p,
+        team2_players: t2p,
+        toss_winner: f.toss_winner,
+        toss_decision: f.toss_decision
+      }
+      const { data: match } = await api.post('/matches/quick', payload)
+      matchId = match.id
+      const { data: t1 } = await api.get(`/teams/${match.team1.id}`)
+      const { data: t2 } = await api.get(`/teams/${match.team2.id}`)
+      batTeamData = battingTeamIndex.value === 1 ? t1 : t2
+      bowlTeamData = battingTeamIndex.value === 1 ? t2 : t1
+    } else {
+      const { data: match } = await api.post('/matches', {
+        tournament_id: f.tournament_id,
+        overs: f.overs,
+        players_per_team: f.players_per_team,
+        team1_id: f.team1_id,
+        team2_id: f.team2_id
+      })
+      matchId = match.id
+
+      const tossWinnerId = f.toss_winner === 1 ? f.team1_id : f.team2_id
+      await api.post(`/matches/${matchId}/toss`, {
+        toss_winner_id: tossWinnerId,
+        toss_decision: f.toss_decision
+      })
+
+      const t1 = activeTournament.value.teams.find(t => t.id === f.team1_id)
+      const t2 = activeTournament.value.teams.find(t => t.id === f.team2_id)
+      batTeamData = battingTeamIndex.value === 1 ? t1 : t2
+      bowlTeamData = battingTeamIndex.value === 1 ? t2 : t1
     }
-    const { data: match } = await api.post('/matches/quick', payload)
-    // Determine player IDs for innings start
-    const { data: t1 } = await api.get(`/teams/${match.team1.id}`)
-    const { data: t2 } = await api.get(`/teams/${match.team2.id}`)
-    const batTeamData = battingTeamIndex.value === 1 ? t1 : t2
-    const bowlTeamData = battingTeamIndex.value === 1 ? t2 : t1
+
     const striker = batTeamData.players[f.striker_id]
     const nonStriker = batTeamData.players[f.non_striker_id]
     const bowler = bowlTeamData.players[f.bowler_id]
-    await api.post(`/matches/${match.id}/start-innings`, {
+    
+    await api.post(`/matches/${matchId}/start-innings`, {
       striker_id: striker.id,
       non_striker_id: nonStriker.id,
       bowler_id: bowler.id
     })
-    router.push(`/match/${match.id}/live`)
+    
+    router.push(`/match/${matchId}/live`)
   } catch (e) {
     error.value = e.response?.data?.detail || e.message
   } finally {
@@ -262,6 +331,16 @@ onMounted(async () => {
   try {
     const { data } = await api.get('/tournaments')
     tournaments.value = data
+    
+    const queryTid = router.currentRoute.value.query.tournament_id
+    if (queryTid) {
+      form.value.tournament_id = parseInt(queryTid)
+      const t = tournaments.value.find(x => x.id === form.value.tournament_id)
+      if (t) {
+        form.value.overs = t.overs_per_match
+        form.value.players_per_team = t.players_per_team
+      }
+    }
   } catch {}
 })
 </script>
