@@ -103,7 +103,7 @@
           <div class="extras-row">
             <button class="btn btn-ghost btn-sm" @click="openExtra('bye')">Bye</button>
             <button class="btn btn-ghost btn-sm" @click="openExtra('leg_bye')">Leg Bye</button>
-            <button class="btn btn-ghost btn-sm" @click="undoBall" :disabled="!state?.current_over_events?.length">Undo</button>
+            <button class="btn btn-ghost btn-sm" @click="undoBall" :disabled="!canUndo">Undo</button>
           </div>
 
           <!-- End of over: change bowler -->
@@ -222,7 +222,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useCricketStore } from '@/stores/cricket'
 import api from '@/api'
@@ -248,6 +248,10 @@ const bowlingTeam = computed(() => {
   if (!i) return null
   return i.bowling_team_id === m.team1_id ? m.team1 : m.team2
 })
+
+const canUndo = computed(() => {
+  return !!state.value?.last_event
+})
 const activeBatsmen = computed(() => state.value?.batting_scores.filter(b => b.is_at_crease) || [])
 const currentBowler = computed(() => state.value?.bowling_scores.find(b => b.is_current_bowler))
 const oversDisplay = computed(() => {
@@ -271,6 +275,12 @@ const nextBowlerId = ref('')
 const bowlingTeamPlayers = ref([])
 const needNewBatsman = ref(false)
 const nextBatsmanId = ref('')
+
+watch(() => inn.value?.bowling_team_id, (newId, oldId) => {
+  if (newId && newId !== oldId) {
+    loadBowlingPlayers()
+  }
+}, { immediate: true })
 const nextBatsmanList = ref([])
 
 const modal = ref({ open: false, type: '', title: '', wicket_type: 'bowled', dismissed_id: null, fielder_id: null, runs_scored: 0, extra_runs: 1 })
@@ -288,11 +298,11 @@ function ballClass(e) {
   return ''
 }
 function ballLabel(e) {
-  if (e.is_wicket) return 'W'
-  if (e.extras_type === 'wide') return `Wd`
-  if (e.extras_type === 'no_ball') return `Nb`
-  if (e.extras_type === 'bye') return `B`
-  if (e.extras_type === 'leg_bye') return `Lb`
+  if (e.is_wicket) return `W${e.runs_scored > 0 ? '+' + e.runs_scored : ''}`
+  if (e.extras_type === 'wide') return e.extras_runs > 1 ? `Wd+${e.extras_runs - 1}` : 'Wd'
+  if (e.extras_type === 'no_ball') return `Nb+${e.runs_scored}`
+  if (e.extras_type === 'bye') return `B+${e.extras_runs}`
+  if (e.extras_type === 'leg_bye') return `Lb+${e.extras_runs}`
   return e.runs_scored
 }
 
@@ -408,7 +418,12 @@ async function undoBall() {
   if (!confirm('Are you sure you want to undo the last delivery?')) return
   try {
     await store.undoBall(inn.value.id)
-    needNewBowler.value = false
+    if (inn.value && inn.value.total_balls > 0 && inn.value.total_balls % 6 === 0) {
+      needNewBowler.value = true
+      await loadBowlingPlayers()
+    } else {
+      needNewBowler.value = false
+    }
     needNewBatsman.value = false
   } catch (e) {
     console.error('Failed to undo', e)
