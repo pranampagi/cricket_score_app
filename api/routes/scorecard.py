@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from api.database import get_db
 from api import models, schemas
@@ -54,18 +54,24 @@ def get_scorecard(mid: int, db: Session = Depends(get_db)):
     for inn in all_innings:
         bat_scores = (
             db.query(models.BattingScore)
+            .options(joinedload(models.BattingScore.player))
             .filter_by(innings_id=inn.id)
             .order_by(models.BattingScore.batting_position)
             .all()
         )
         bwl_scores = (
             db.query(models.BowlingScore)
+            .options(joinedload(models.BowlingScore.player))
             .filter_by(innings_id=inn.id)
             .all()
         )
+
         overs_f = inn.total_balls // 6
         rem = inn.total_balls % 6
         overs_display = f"{overs_f}.{rem}"
+
+        fall_of_wickets = _build_fall_of_wickets(inn.id, db)
+
         innings_list.append(
             schemas.ScorecardInnings(
                 innings=schemas.InningsOut.model_validate(inn),
@@ -76,12 +82,12 @@ def get_scorecard(mid: int, db: Session = Depends(get_db)):
                     inn.bowling_team
                 ),
                 batting_scores=[
-                    build_batting_scoreout(b, db) for b in bat_scores
+                    build_batting_scoreout(b) for b in bat_scores
                 ],
                 bowling_scores=[
-                    build_bowling_scoreout(b, db) for b in bwl_scores
+                    build_bowling_scoreout(b) for b in bwl_scores
                 ],
-                fall_of_wickets=[],
+                fall_of_wickets=fall_of_wickets,
                 overs_display=overs_display,
             )
         )
@@ -89,3 +95,37 @@ def get_scorecard(mid: int, db: Session = Depends(get_db)):
         match=schemas.MatchOut.model_validate(match),
         innings_list=innings_list,
     )
+
+
+def _build_fall_of_wickets(innings_id: int, db: Session) -> list[dict]:
+    all_events = (
+        db.query(models.BallEvent)
+        .options(joinedload(models.BallEvent.dismissed_player))
+        .filter_by(innings_id=innings_id)
+        .order_by(models.BallEvent.id)
+        .all()
+    )
+
+    running_total = 0
+    fall_of_wickets = []
+    wicket_num = 0
+
+    for event in all_events:
+        running_total += event.total_runs
+        if event.is_wicket and event.dismissed_player_id:
+            wicket_num += 1
+            player_name = (
+                event.dismissed_player.name
+                if event.dismissed_player
+                else "Unknown"
+            )
+            fall_of_wickets.append(
+                {
+                    "wicket": wicket_num,
+                    "runs": running_total,
+                    "player_name": player_name,
+                    "over": f"{event.over_number + 1}.{event.ball_number}",
+                }
+            )
+
+    return fall_of_wickets

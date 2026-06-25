@@ -1,9 +1,12 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from api.database import get_db
 from api import models, schemas
 from api.helpers import build_live_state, finish_match
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["innings"])
 
@@ -153,12 +156,25 @@ def record_ball(
     if end_of_over:
         rotate = not rotate
 
+    # --- Maiden over tracking ---
+    if end_of_over:
+        over_events = (
+            db.query(models.BallEvent)
+            .filter_by(
+                innings_id=iid,
+                over_number=over_num,
+                bowler_id=data.bowler_id,
+            )
+            .all()
+        )
+        over_runs = sum(e.total_runs for e in over_events)
+        if over_runs == 0:
+            bwl_score.maidens += 1
+
     if rotate:
         striker_bs = (
             db.query(models.BattingScore)
-            .filter_by(
-                innings_id=iid, player_id=data.striker_id
-            )
+            .filter_by(innings_id=iid, player_id=data.striker_id)
             .first()
         )
         non_striker_id = data.non_striker_id
@@ -178,9 +194,7 @@ def record_ball(
         if non_striker_id:
             non_striker_bs = (
                 db.query(models.BattingScore)
-                .filter_by(
-                    innings_id=iid, player_id=non_striker_id
-                )
+                .filter_by(innings_id=iid, player_id=non_striker_id)
                 .first()
             )
             if striker_bs and non_striker_bs:
@@ -229,128 +243,162 @@ def record_ball(
 
 @router.post("/api/innings/{iid}/undo", response_model=schemas.LiveState)
 def undo_ball(iid: int, db: Session = Depends(get_db)):
-    innings = db.get(models.Innings, iid)
-    if not innings:
-        raise HTTPException(404, "Innings not found")
-    match = db.get(models.Match, innings.match_id)
+    try:
+        innings = db.get(models.Innings, iid)
+        if not innings:
+            raise HTTPException(404, "Innings not found")
+        match = db.get(models.Match, innings.match_id)
 
-    last_event = (
-        db.query(models.BallEvent)
-        .filter_by(innings_id=iid)
-        .order_by(models.BallEvent.id.desc())
-        .first()
-    )
-    if not last_event:
-        raise HTTPException(400, "No balls to undo in this innings")
-
-    is_wide = last_event.extras_type == "wide"
-    is_legal = last_event.is_legal
-
-    innings.total_runs = max(0, innings.total_runs - last_event.total_runs)
-    if last_event.extras_type:
-        innings.total_extras = max(
-            0, innings.total_extras - last_event.extras_runs
+        last_event = (
+            db.query(models.BallEvent)
+            .filter_by(innings_id=iid)
+            .order_by(models.BallEvent.id.desc())
+            .first()
         )
-    if is_legal:
-        innings.total_balls = max(0, innings.total_balls - 1)
-    if last_event.is_wicket:
-        innings.total_wickets = max(0, innings.total_wickets - 1)
+        if not last_event:
+            raise HTTPException(400, "No balls to undo in this innings")
 
-    if innings.is_completed:
-        innings.is_completed = False
-        match.status = "live"
-        match.winner_id = None
-        match.result_summary = None
+        is_wide = last_event.extras_type == "wide"
+        is_legal = last_event.is_legal
 
-    crease_batsmen = (
-        db.query(models.BattingScore)
-        .filter_by(innings_id=iid, is_at_crease=True)
-        .all()
-    )
-    for b in crease_batsmen:
-        if b.player_id not in (
-            last_event.striker_id,
-            last_event.non_striker_id,
-        ):
-            db.delete(b)
-
-    striker_bs = (
-        db.query(models.BattingScore)
-        .filter_by(
-            innings_id=iid, player_id=last_event.striker_id
+        innings.total_runs = max(
+            0, innings.total_runs - last_event.total_runs
         )
-        .first()
-    )
-    if striker_bs:
-        striker_bs.is_at_crease = True
-        striker_bs.is_on_strike = True
-        striker_bs.is_out = False
-        striker_bs.dismissal_text = None
-        if not is_wide:
-            striker_bs.balls_faced = max(
-                0, striker_bs.balls_faced - 1
+        if last_event.extras_type:
+            innings.total_extras = max(
+                0, innings.total_extras - last_event.extras_runs
             )
-            striker_bs.runs = max(
-                0, striker_bs.runs - last_event.runs_scored
-            )
-            if last_event.runs_scored == 4:
-                striker_bs.fours = max(0, striker_bs.fours - 1)
-            if last_event.runs_scored == 6:
-                striker_bs.sixes = max(0, striker_bs.sixes - 1)
+        if is_legal:
+            innings.total_balls = max(0, innings.total_balls - 1)
+        if last_event.is_wicket:
+            innings.total_wickets = max(0, innings.total_wickets - 1)
 
-    if last_event.non_striker_id:
-        ns_bs = (
+        if innings.is_completed:
+            innings.is_completed = False
+            match.status = "live"
+            match.winner_id = None
+            match.result_summary = None
+
+        crease_batsmen = (
+            db.query(models.BattingScore)
+            .filter_by(innings_id=iid, is_at_crease=True)
+            .all()
+        )
+        for b in crease_batsmen:
+            if b.player_id not in (
+                last_event.striker_id,
+                last_event.non_striker_id,
+            ):
+                db.delete(b)
+
+        striker_bs = (
             db.query(models.BattingScore)
             .filter_by(
-                innings_id=iid,
-                player_id=last_event.non_striker_id,
+                innings_id=iid, player_id=last_event.striker_id
             )
             .first()
         )
-        if ns_bs:
-            ns_bs.is_at_crease = True
-            ns_bs.is_on_strike = False
-            ns_bs.is_out = False
-            ns_bs.dismissal_text = None
+        if striker_bs:
+            striker_bs.is_at_crease = True
+            striker_bs.is_on_strike = True
+            striker_bs.is_out = False
+            striker_bs.dismissal_text = None
+            if not is_wide:
+                striker_bs.balls_faced = max(
+                    0, striker_bs.balls_faced - 1
+                )
+                striker_bs.runs = max(
+                    0, striker_bs.runs - last_event.runs_scored
+                )
+                if last_event.runs_scored == 4:
+                    striker_bs.fours = max(
+                        0, striker_bs.fours - 1
+                    )
+                if last_event.runs_scored == 6:
+                    striker_bs.sixes = max(
+                        0, striker_bs.sixes - 1
+                    )
 
-    db.query(models.BowlingScore).filter_by(
-        innings_id=iid
-    ).update({"is_current_bowler": False})
-    bwl_score = (
-        db.query(models.BowlingScore)
-        .filter_by(
-            innings_id=iid, player_id=last_event.bowler_id
-        )
-        .first()
-    )
-    if bwl_score:
-        bwl_score.is_current_bowler = True
-        conceded = last_event.runs_scored
-        if last_event.extras_type in ("wide", "no_ball"):
-            conceded += last_event.extras_runs
-        bwl_score.runs_conceded = max(
-            0, bwl_score.runs_conceded - conceded
-        )
-        if is_legal:
-            bwl_score.balls_bowled = max(
-                0, bwl_score.balls_bowled - 1
+        if last_event.non_striker_id:
+            ns_bs = (
+                db.query(models.BattingScore)
+                .filter_by(
+                    innings_id=iid,
+                    player_id=last_event.non_striker_id,
+                )
+                .first()
             )
-        if last_event.extras_type == "wide":
-            bwl_score.wides = max(0, bwl_score.wides - 1)
-        if last_event.extras_type == "no_ball":
-            bwl_score.no_balls = max(0, bwl_score.no_balls - 1)
-        if (
-            last_event.is_wicket
-            and last_event.wicket_type not in ("run_out",)
-        ):
-            bwl_score.wickets = max(0, bwl_score.wickets - 1)
+            if ns_bs:
+                ns_bs.is_at_crease = True
+                ns_bs.is_on_strike = False
+                ns_bs.is_out = False
+                ns_bs.dismissal_text = None
 
-    db.delete(last_event)
-    db.commit()
-    db.refresh(match)
-    db.refresh(innings)
+        db.query(models.BowlingScore).filter_by(
+            innings_id=iid
+        ).update({"is_current_bowler": False})
+        bwl_score = (
+            db.query(models.BowlingScore)
+            .filter_by(
+                innings_id=iid, player_id=last_event.bowler_id
+            )
+            .first()
+        )
+        if bwl_score:
+            bwl_score.is_current_bowler = True
+            conceded = last_event.runs_scored
+            if last_event.extras_type in ("wide", "no_ball"):
+                conceded += last_event.extras_runs
+            bwl_score.runs_conceded = max(
+                0, bwl_score.runs_conceded - conceded
+            )
+            if is_legal:
+                bwl_score.balls_bowled = max(
+                    0, bwl_score.balls_bowled - 1
+                )
+            if last_event.extras_type == "wide":
+                bwl_score.wides = max(0, bwl_score.wides - 1)
+            if last_event.extras_type == "no_ball":
+                bwl_score.no_balls = max(
+                    0, bwl_score.no_balls - 1
+                )
+            if (
+                last_event.is_wicket
+                and last_event.wicket_type not in ("run_out",)
+            ):
+                bwl_score.wickets = max(
+                    0, bwl_score.wickets - 1
+                )
 
-    return build_live_state(match, innings, db)
+            if is_legal and last_event.ball_number == 6:
+                remaining_over_events = (
+                    db.query(models.BallEvent)
+                    .filter_by(
+                        innings_id=iid,
+                        over_number=last_event.over_number,
+                        bowler_id=last_event.bowler_id,
+                    )
+                    .all()
+                )
+                total_over_runs = sum(
+                    e.total_runs for e in remaining_over_events
+                )
+                if total_over_runs > 0 and bwl_score.maidens > 0:
+                    bwl_score.maidens -= 1
+
+        db.delete(last_event)
+        db.commit()
+        db.refresh(match)
+        db.refresh(innings)
+
+        return build_live_state(match, innings, db)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.exception("Failed to undo ball in innings %s", iid)
+        raise HTTPException(500, f"Failed to undo ball: {str(e)}")
 
 
 @router.post("/api/innings/{iid}/next-bowler")

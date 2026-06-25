@@ -1,13 +1,16 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from api import models, schemas
 
 
 def finish_match(match, innings, db: Session):
     if innings.innings_number == 2:
-        inn1 = db.query(models.Innings).filter_by(
-            match_id=match.id, innings_number=1
-        ).first()
+        inn1 = (
+            db.query(models.Innings)
+            .options(joinedload(models.Innings.batting_team))
+            .filter_by(match_id=match.id, innings_number=1)
+            .first()
+        )
         if innings.total_runs >= innings.target:
             match.winner_id = innings.batting_team_id
             total_possible_wkts = (
@@ -40,12 +43,11 @@ def ball_display(event):
     return str(event.runs_scored)
 
 
-def build_batting_scoreout(b, db: Session):
-    p = db.get(models.Player, b.player_id)
+def build_batting_scoreout(b):
     return schemas.BattingScoreOut(
         id=b.id,
         player_id=b.player_id,
-        player_name=p.name if p else "",
+        player_name=b.player.name if b.player else "",
         runs=b.runs,
         balls_faced=b.balls_faced,
         fours=b.fours,
@@ -59,12 +61,11 @@ def build_batting_scoreout(b, db: Session):
     )
 
 
-def build_bowling_scoreout(b, db: Session):
-    p = db.get(models.Player, b.player_id)
+def build_bowling_scoreout(b):
     return schemas.BowlingScoreOut(
         id=b.id,
         player_id=b.player_id,
-        player_name=p.name if p else "",
+        player_name=b.player.name if b.player else "",
         balls_bowled=b.balls_bowled,
         overs_display=b.overs_display,
         maidens=b.maidens,
@@ -79,10 +80,16 @@ def build_bowling_scoreout(b, db: Session):
 
 def build_live_state(match, innings, db: Session) -> schemas.LiveState:
     bat_scores = (
-        db.query(models.BattingScore).filter_by(innings_id=innings.id).all()
+        db.query(models.BattingScore)
+        .options(joinedload(models.BattingScore.player))
+        .filter_by(innings_id=innings.id)
+        .all()
     )
     bwl_scores = (
-        db.query(models.BowlingScore).filter_by(innings_id=innings.id).all()
+        db.query(models.BowlingScore)
+        .options(joinedload(models.BowlingScore.player))
+        .filter_by(innings_id=innings.id)
+        .all()
     )
     all_events = (
         db.query(models.BallEvent).filter_by(innings_id=innings.id).all()
@@ -119,8 +126,8 @@ def build_live_state(match, innings, db: Session) -> schemas.LiveState:
     return schemas.LiveState(
         match=schemas.MatchOut.model_validate(match),
         innings=schemas.InningsOut.model_validate(innings),
-        batting_scores=[build_batting_scoreout(b, db) for b in bat_scores],
-        bowling_scores=[build_bowling_scoreout(b, db) for b in bwl_scores],
+        batting_scores=[build_batting_scoreout(b) for b in bat_scores],
+        bowling_scores=[build_bowling_scoreout(b) for b in bwl_scores],
         current_over_events=[
             schemas.BallEventOut.model_validate(e) for e in cur_over_events
         ],
