@@ -66,6 +66,7 @@ def get_standings(tid: int, db: Session = Depends(get_db)):
     tournament = db.get(models.Tournament, tid)
     if not tournament:
         raise HTTPException(404, "Tournament not found")
+
     teams = {
         t.id: {
             "id": t.id,
@@ -76,9 +77,14 @@ def get_standings(tid: int, db: Session = Depends(get_db)):
             "tied": 0,
             "nrr": 0.0,
             "points": 0,
+            "runs_scored": 0,
+            "balls_faced": 0,
+            "runs_conceded": 0,
+            "balls_bowled": 0,
         }
         for t in tournament.teams
     }
+
     for m in tournament.matches:
         if m.status != "completed":
             continue
@@ -97,6 +103,32 @@ def get_standings(tid: int, db: Session = Depends(get_db)):
                 teams[m.winner_id]["points"] += 2
             if loser_id in teams:
                 teams[loser_id]["lost"] += 1
+
+        innings_list = (
+            db.query(models.Innings)
+            .filter_by(match_id=m.id)
+            .all()
+        )
+        for inn in innings_list:
+            bat_id = inn.batting_team_id
+            bowl_id = inn.bowling_team_id
+            if bat_id in teams:
+                teams[bat_id]["runs_scored"] += inn.total_runs
+                teams[bat_id]["balls_faced"] += inn.total_balls
+            if bowl_id in teams:
+                teams[bowl_id]["runs_conceded"] += inn.total_runs
+                teams[bowl_id]["balls_bowled"] += inn.total_balls
+
+    for tdata in teams.values():
+        overs_faced = tdata["balls_faced"] / 6
+        overs_bowled = tdata["balls_bowled"] / 6
+        if overs_faced > 0 and overs_bowled > 0:
+            tdata["nrr"] = round(
+                (tdata["runs_scored"] / overs_faced)
+                - (tdata["runs_conceded"] / overs_bowled),
+                3,
+            )
+
     return sorted(
-        teams.values(), key=lambda x: (-x["points"], -x["won"])
+        teams.values(), key=lambda x: (-x["points"], -x["won"], -x["nrr"])
     )
